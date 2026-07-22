@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nexverse — Listings</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div>
+    <h1>NEXVERSE</h1>
+    <div class="sub">Showing checklists by location</div>
+  </div>
+  <div class="topbar-actions">
+    <button class="btn-accent" id="add-listing-btn">+ Add listing</button>
+    <button class="btn-ghost" id="logout-btn">Log out</button>
+  </div>
+</header>
+
+<div class="dash-wrap">
+  <div id="empty-state" class="empty-state hidden">
+    <h2>No listings yet</h2>
+    <p>Add your first location to start a showing checklist.</p>
+  </div>
+  <div class="tiles" id="tiles-container"></div>
+</div>
+
+<!-- Add listing modal -->
+<div class="modal-overlay hidden" id="modal-overlay">
+  <div class="modal">
+    <h3>Add listing</h3>
+    <div class="modal-sub">Just the location name and an optional icon — the full checklist opens after.</div>
+
+    <div class="field">
+      <label for="new-listing-name">Location name</label>
+      <input type="text" id="new-listing-name" placeholder="e.g. 412 King St W">
+    </div>
+
+    <div class="field">
+      <label>Icon (optional)</label>
+      <div class="icon-upload">
+        <div class="icon-preview" id="icon-preview">
+          <svg viewBox="0 0 24 24"><path d="M3 21V8l9-5 9 5v13H14v-7h-4v7H3z" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+        <button type="button" class="file-btn" id="file-btn">Upload icon</button>
+        <input type="file" id="icon-file" accept="image/*" class="hidden">
+      </div>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn-secondary" id="cancel-listing-btn">Cancel</button>
+      <button class="btn-primary" id="create-listing-btn">Create tile</button>
+    </div>
+  </div>
+</div>
+
+<script src="storage.js"></script>
+<script src="auth-core.js"></script>
+<script src="checklist-data.js"></script>
+<script src="dashboard.js"></script>
+</body>
+</html>

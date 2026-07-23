@@ -1,10 +1,4 @@
 (function () {
-  // If already logged in, skip straight to dashboard
-  if (NexAuth.isLoggedIn()) {
-    window.location.href = 'dashboard.html';
-    return;
-  }
-
   const loginView = document.getElementById('login-view');
   const resetView = document.getElementById('reset-view');
   const loginForm = document.getElementById('login-form');
@@ -15,6 +9,18 @@
   const resetForm = document.getElementById('reset-form');
   const resetError = document.getElementById('reset-error');
   const resetSuccess = document.getElementById('reset-success');
+
+  async function init() {
+    try {
+      if (await NexAPI.checkSession()) {
+        window.location.href = 'dashboard.html';
+        return;
+      }
+    } catch (e) {
+      // if the session check fails (e.g. backend not set up yet), just show the login form
+    }
+  }
+  init();
 
   showResetBtn.addEventListener('click', () => {
     loginView.classList.add('hidden');
@@ -29,50 +35,51 @@
     loginError.classList.remove('show');
   });
 
-  loginForm.addEventListener('submit', (e) => {
+  loginForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const username = document.getElementById('username').value.trim();
     const password = document.getElementById('password').value;
-    const creds = NexAuth.getCredentials();
+    const submitBtn = loginForm.querySelector('button[type="submit"]');
 
-    if (username === creds.username && password === creds.password) {
-      loginError.classList.remove('show');
-      NexAuth.login();
+    loginError.classList.remove('show');
+    submitBtn.disabled = true;
+    try {
+      await NexAPI.login(username, password);
       window.location.href = 'dashboard.html';
-    } else {
-      loginError.textContent = 'Incorrect username or password.';
+    } catch (err) {
+      loginError.textContent = err.message || 'Incorrect username or password.';
       loginError.classList.add('show');
+    } finally {
+      submitBtn.disabled = false;
     }
   });
 
-  resetForm.addEventListener('submit', (e) => {
+  resetForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const username = document.getElementById('reset-username').value.trim();
     const newPassword = document.getElementById('reset-new-password').value;
     const confirmPassword = document.getElementById('reset-confirm-password').value;
-    const creds = NexAuth.getCredentials();
+    const submitBtn = resetForm.querySelector('button[type="submit"]');
 
     resetSuccess.classList.remove('show');
+    resetError.classList.remove('show');
 
-    if (username !== creds.username) {
-      resetError.textContent = 'That username does not match this account.';
-      resetError.classList.add('show');
-      return;
-    }
-    if (newPassword.length < 6) {
-      resetError.textContent = 'New password must be at least 6 characters.';
-      resetError.classList.add('show');
-      return;
-    }
     if (newPassword !== confirmPassword) {
       resetError.textContent = 'Passwords do not match.';
       resetError.classList.add('show');
       return;
     }
 
-    NexAuth.setCredentials(creds.username, newPassword);
-    resetError.classList.remove('show');
-    resetSuccess.classList.add('show');
-    resetForm.reset();
+    submitBtn.disabled = true;
+    try {
+      await NexAPI.resetPassword(username, newPassword);
+      resetSuccess.classList.add('show');
+      resetForm.reset();
+    } catch (err) {
+      resetError.textContent = err.message || 'Could not reset password.';
+      resetError.classList.add('show');
+    } finally {
+      submitBtn.disabled = false;
+    }
   });
 })();

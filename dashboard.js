@@ -1,33 +1,23 @@
 (function () {
-  // ---- Auth guard ----
-  if (!NexAuth.isLoggedIn()) {
-    window.location.href = 'index.html';
-    return;
-  }
-
-  const LISTINGS_KEY = 'nexverse_listings';
   const PLACEHOLDER_ICON_SVG =
     '<svg viewBox="0 0 24 24"><path d="M3 21V8l9-5 9 5v13H14v-7h-4v7H3z" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
-  function checklistKey(id) {
-    return `nexverse_checklist_${id}`;
+  function debounce(fn, wait) {
+    let timer;
+    return (...args) => {
+      clearTimeout(timer);
+      timer = setTimeout(() => fn(...args), wait);
+    };
   }
 
-  function getListings() {
-    return NexStorage.get(LISTINGS_KEY) || [];
-  }
-  function saveListings(listings) {
-    NexStorage.set(LISTINGS_KEY, listings);
-  }
+  const tilesContainer = document.getElementById('tiles-container');
+  const emptyState = document.getElementById('empty-state');
+
+  let listingsCache = [];
+  const checklistCache = {}; // id -> state
 
   function defaultChecklistState() {
     return { meta: {}, items: {}, conditions: {}, notes: '' };
-  }
-  function getChecklistState(id) {
-    return NexStorage.get(checklistKey(id)) || defaultChecklistState();
-  }
-  function saveChecklistState(id, state) {
-    NexStorage.set(checklistKey(id), state);
   }
 
   function countTotals(state) {
@@ -47,17 +37,38 @@
     return { total, checked, hasDealbreakerChecked };
   }
 
-  // ---- Rendering ----
-  const tilesContainer = document.getElementById('tiles-container');
-  const emptyState = document.getElementById('empty-state');
+  // ---- Boot ----
+  async function init() {
+    let loggedIn = false;
+    try {
+      loggedIn = await NexAPI.checkSession();
+    } catch (e) {
+      loggedIn = false;
+    }
+    if (!loggedIn) {
+      window.location.href = 'index.html';
+      return;
+    }
+    await loadAndRenderTiles();
+  }
 
+  async function loadAndRenderTiles() {
+    listingsCache = await NexAPI.getListings();
+    await Promise.all(
+      listingsCache.map(async (l) => {
+        checklistCache[l.id] = await NexAPI.getChecklist(l.id);
+      })
+    );
+    renderTiles();
+  }
+
+  // ---- Tiles ----
   function renderTiles() {
-    const listings = getListings();
     tilesContainer.innerHTML = '';
-    emptyState.classList.toggle('hidden', listings.length > 0);
+    emptyState.classList.toggle('hidden', listingsCache.length > 0);
 
-    listings.forEach((listing) => {
-      const state = getChecklistState(listing.id);
+    listingsCache.forEach((listing) => {
+      const state = checklistCache[listing.id] || defaultChecklistState();
       const { total, checked, hasDealbreakerChecked } = countTotals(state);
 
       const tile = document.createElement('div');
@@ -66,9 +77,7 @@
 
       const iconWrap = document.createElement('div');
       iconWrap.className = 'tile-icon';
-      iconWrap.innerHTML = listing.icon
-        ? `<img src="${listing.icon}" alt="">`
-        : PLACEHOLDER_ICON_SVG;
+      iconWrap.innerHTML = listing.icon ? `<img src="${listing.icon}" alt="">` : PLACEHOLDER_ICON_SVG;
 
       const name = document.createElement('div');
       name.className = 'tile-name';
@@ -76,22 +85,29 @@
 
       const meta = document.createElement('div');
       meta.className = 'tile-meta';
-      meta.innerHTML = `${checked}/${total} checked` + (hasDealbreakerChecked ? '<br><span style="color:#b3452e;">⚠ dealbreaker</span>' : '');
+      meta.innerHTML =
+        `${checked}/${total} checked` +
+        (hasDealbreakerChecked ? '<br><span style="color:#b3452e;">⚠ dealbreaker</span>' : '');
 
       const chevron = document.createElement('div');
       chevron.className = 'tile-chevron';
-      chevron.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6,9 12,15 18,9"/></svg>';
+      chevron.innerHTML =
+        '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6,9 12,15 18,9"/></svg>';
 
       const deleteBtn = document.createElement('button');
       deleteBtn.className = 'tile-delete';
       deleteBtn.textContent = 'Remove';
-      deleteBtn.addEventListener('click', (e) => {
+      deleteBtn.addEventListener('click', async (e) => {
         e.stopPropagation();
-        if (confirm(`Remove "${listing.name}" and its checklist?`)) {
-          const updated = getListings().filter((l) => l.id !== listing.id);
-          saveListings(updated);
-          NexStorage.remove(checklistKey(listing.id));
+        if (!confirm(`Remove "${listing.name}" and its checklist?`)) return;
+        deleteBtn.disabled = true;
+        try {
+          listingsCache = await NexAPI.deleteListing(listing.id);
+          delete checklistCache[listing.id];
           renderTiles();
+        } catch (err) {
+          alert('Could not remove listing. Please try again.');
+          deleteBtn.disabled = false;
         }
       });
 
@@ -126,7 +142,7 @@
 
   // ---- Checklist panel ----
   function buildChecklistPanel(listingId) {
-    const state = getChecklistState(listingId);
+    const state = checklistCache[listingId] || (checklistCache[listingId] = defaultChecklistState());
     const panel = document.createElement('div');
     panel.className = 'panel';
     panel.dataset.id = listingId;
@@ -135,10 +151,16 @@
     inner.className = 'panel-inner';
     panel.appendChild(inner);
 
-    function persist() {
-      saveChecklistState(listingId, state);
+    const scheduleSave = debounce(() => {
+      NexAPI.saveChecklist(listingId, state).catch(() => {
+        // best-effort; a later edit will retry the save
+      });
+    }, 500);
+
+    function onChange() {
+      scheduleSave();
       refreshTileSummary(listingId);
-      updateStatusBar();
+      panel._updateStatusBar();
     }
 
     // --- meta fields ---
@@ -163,7 +185,7 @@
         input.value = state.meta[f.id] || '';
         input.addEventListener('input', () => {
           state.meta[f.id] = input.value;
-          persist();
+          onChange();
         });
         field.appendChild(label);
         field.appendChild(input);
@@ -188,7 +210,8 @@
         state.items[item.id] = itemState;
 
         const row = document.createElement('div');
-        row.className = 'item' + (item.dealbreaker ? ' dealbreaker' : '') + (itemState.checked ? ' checked' : '');
+        row.className =
+          'item' + (item.dealbreaker ? ' dealbreaker' : '') + (itemState.checked ? ' checked' : '');
 
         const box = document.createElement('div');
         box.className = 'box' + (itemState.checked ? ' checked' : '');
@@ -211,7 +234,7 @@
           input.addEventListener('click', (e) => e.stopPropagation());
           input.addEventListener('input', () => {
             itemState.value = input.value;
-            persist();
+            onChange();
           });
           inline.appendChild(input);
           labelWrap.appendChild(inline);
@@ -232,7 +255,7 @@
             radio.addEventListener('click', (e) => e.stopPropagation());
             radio.addEventListener('change', () => {
               state.conditions[item.id] = idx;
-              persist();
+              onChange();
             });
             lab.appendChild(radio);
             lab.appendChild(document.createTextNode(choice));
@@ -246,7 +269,7 @@
           itemState.checked = !itemState.checked;
           box.classList.toggle('checked', itemState.checked);
           row.classList.toggle('checked', itemState.checked);
-          persist();
+          onChange();
         }
         box.addEventListener('click', toggleCheck);
         labelWrap.addEventListener('click', toggleCheck);
@@ -270,7 +293,7 @@
     notesArea.value = state.notes || '';
     notesArea.addEventListener('input', () => {
       state.notes = notesArea.value;
-      persist();
+      scheduleSave();
     });
     notesBox.appendChild(notesLabel);
     notesBox.appendChild(notesArea);
@@ -291,14 +314,10 @@
     panel._updateStatusBar = function () {
       const { total, checked, hasDealbreakerChecked } = countTotals(state);
       statusBar.querySelector('.progress-text').textContent = `${checked} / ${total} checked`;
-      statusBar.querySelector('.bar-fill').style.width = (total ? (checked / total * 100) : 0) + '%';
+      statusBar.querySelector('.bar-fill').style.width = (total ? (checked / total) * 100 : 0) + '%';
       statusBar.querySelector('.alert').classList.toggle('show', hasDealbreakerChecked);
     };
     panel._updateStatusBar();
-
-    function updateStatusBar() {
-      panel._updateStatusBar();
-    }
 
     return panel;
   }
@@ -306,10 +325,12 @@
   function refreshTileSummary(listingId) {
     const tile = tilesContainer.querySelector(`.tile[data-id="${listingId}"]`);
     if (!tile) return;
-    const state = getChecklistState(listingId);
+    const state = checklistCache[listingId] || defaultChecklistState();
     const { total, checked, hasDealbreakerChecked } = countTotals(state);
     const meta = tile.querySelector('.tile-meta');
-    meta.innerHTML = `${checked}/${total} checked` + (hasDealbreakerChecked ? '<br><span style="color:#b3452e;">⚠ dealbreaker</span>' : '');
+    meta.innerHTML =
+      `${checked}/${total} checked` +
+      (hasDealbreakerChecked ? '<br><span style="color:#b3452e;">⚠ dealbreaker</span>' : '');
   }
 
   // ---- Add listing modal ----
@@ -353,32 +374,37 @@
     reader.readAsDataURL(file);
   });
 
-  createListingBtn.addEventListener('click', () => {
+  createListingBtn.addEventListener('click', async () => {
     const name = nameInput.value.trim();
     if (!name) {
       nameInput.focus();
       return;
     }
-    const listings = getListings();
-    const id = `l_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    listings.push({ id, name, icon: pendingIcon, createdAt: Date.now() });
-    saveListings(listings);
-    closeModal();
-    renderTiles();
+    createListingBtn.disabled = true;
+    try {
+      const listing = await NexAPI.createListing(name, pendingIcon);
+      listingsCache.push(listing);
+      checklistCache[listing.id] = defaultChecklistState();
+      closeModal();
+      renderTiles();
 
-    // auto-expand the newly created tile
-    const newTile = tilesContainer.querySelector(`.tile[data-id="${id}"]`);
-    if (newTile) {
-      newTile.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      toggleTile(id);
+      const newTile = tilesContainer.querySelector(`.tile[data-id="${listing.id}"]`);
+      if (newTile) {
+        newTile.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        toggleTile(listing.id);
+      }
+    } catch (err) {
+      alert('Could not create listing. Please try again.');
+    } finally {
+      createListingBtn.disabled = false;
     }
   });
 
   // ---- Logout ----
-  document.getElementById('logout-btn').addEventListener('click', () => {
-    NexAuth.logout();
+  document.getElementById('logout-btn').addEventListener('click', async () => {
+    await NexAPI.logout();
     window.location.href = 'index.html';
   });
 
-  renderTiles();
+  init();
 })();

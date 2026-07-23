@@ -57,6 +57,7 @@
   resetForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const username = document.getElementById('reset-username').value.trim();
+    const oldPassword = document.getElementById('reset-old-password').value;
     const newPassword = document.getElementById('reset-new-password').value;
     const confirmPassword = document.getElementById('reset-confirm-password').value;
     const submitBtn = resetForm.querySelector('button[type="submit"]');
@@ -72,7 +73,7 @@
 
     submitBtn.disabled = true;
     try {
-      await NexAPI.resetPassword(username, newPassword);
+      await NexAPI.resetPassword(username, oldPassword, newPassword);
       resetSuccess.classList.add('show');
       resetForm.reset();
     } catch (err) {

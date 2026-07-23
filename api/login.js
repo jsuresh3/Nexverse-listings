@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { kv, getCredentials, setSessionCookie, SESSION_TTL_SECONDS } from './_lib.js';
+import { kv, validateUser, setSessionCookie, SESSION_TTL_SECONDS } from './_lib.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -9,8 +9,8 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Username and password required' });
   }
 
-  const creds = await getCredentials();
-  if (username !== creds.username || password !== creds.password) {
+  const ok = await validateUser(username, password);
+  if (!ok) {
     return res.status(401).json({ error: 'Incorrect username or password' });
   }
 

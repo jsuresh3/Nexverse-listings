@@ -2,7 +2,14 @@ import { kv } from '@vercel/kv';
 
 const SESSION_COOKIE = 'nexverse_session';
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7; // 7 days
-const DEFAULT_CREDENTIALS = { username: 'Nexverse', password: 'test1234' };
+const USERS_KEY = 'users';
+
+// Both accounts share the same data (listings/checklists are stored under
+// global keys, not per-user), so this is just two logins into one workspace.
+const DEFAULT_USERS = {
+  Nexverse: 'test1234',
+  sherington: 'test1234'
+};
 
 export function parseCookies(req) {
   const header = req.headers.cookie || '';
@@ -38,15 +45,24 @@ export async function requireSession(req) {
   return !!valid;
 }
 
-export async function getCredentials() {
-  const stored = await kv.get('credentials');
-  if (stored && stored.username && stored.password) return stored;
-  await kv.set('credentials', DEFAULT_CREDENTIALS);
-  return DEFAULT_CREDENTIALS;
+export async function getUsers() {
+  const stored = await kv.get(USERS_KEY);
+  if (stored && typeof stored === 'object' && Object.keys(stored).length > 0) return stored;
+  await kv.set(USERS_KEY, DEFAULT_USERS);
+  return DEFAULT_USERS;
 }
 
-export async function setCredentials(username, password) {
-  await kv.set('credentials', { username, password });
+export async function validateUser(username, password) {
+  const users = await getUsers();
+  return Object.prototype.hasOwnProperty.call(users, username) && users[username] === password;
+}
+
+export async function setUserPassword(username, newPassword) {
+  const users = await getUsers();
+  if (!Object.prototype.hasOwnProperty.call(users, username)) return false;
+  users[username] = newPassword;
+  await kv.set(USERS_KEY, users);
+  return true;
 }
 
 export { kv, SESSION_COOKIE, SESSION_TTL_SECONDS };
